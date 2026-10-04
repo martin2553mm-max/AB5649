@@ -1,0 +1,428 @@
+--[[
+====================================================
+   ⚡ AB HUB V1 ⚡
+   - ESP Players + Inventory
+   - Aimbot with FOV & Wallcheck
+   - Black Screen Button (GG7)
+   - Hernexuz Detection System
+   - User ID Protection
+====================================================
+--]]
+
+print("⚡ [AB HUB V1] เริ่มโหลดสคริปต์...")
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterPack = game:GetService("StarterPack")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local TeleportService = game:GetService("TeleportService")
+local TextChatService = game:GetService("TextChatService")
+
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+print("✅ [AB HUB V1] Services โหลดครบ")
+
+--[[ ============ 1. การเช็ค ID (ปิดไว้ก่อน) ============ ]]
+local AllowedUserIDs = {
+    [9660032322]  = true,
+    [9680871870]  = true,
+    [7909497107]  = true,
+    [9443560044]  = true,
+    [10983064661] = true,
+    [9034198439]  = true,
+    [9886939282]  = true,
+    [9090000346]  = true,
+    [2041444475]  = true,
+    [9435614564]  = true,
+    [9835423112]  = true,
+    [9781601906]  = true,
+    [3691056715]  = true,
+    [9444790877]  = true,
+}
+
+print("🔍 [AB HUB V1] UserId ของคุณคือ:", LocalPlayer.UserId)
+
+local function CheckUserID()
+    -- ✅ โหมดทดสอบ: เปิดให้ทุกคนใช้
+    return true
+    
+    -- ถ้าจะเปิดเช็คจริง ให้ลบบรรทัด "return true" ด้านบนออก แล้วใช้โค้ดนี้:
+    -- return AllowedUserIDs[LocalPlayer.UserId] == true
+end
+
+if not CheckUserID() then
+    warn("❌ [AB HUB V1] ID ของคุณไม่อยู่ในรายการ: " .. LocalPlayer.UserId)
+    return
+end
+
+print("✅ [AB HUB V1] ผ่านการตรวจสอบ - ยินดีต้อนรับ " .. LocalPlayer.Name)
+
+--[[ ============ 2. การตั้งค่า ============ ]]
+local espInventoryEnabled = true
+local MAX_DISTANCE = 2000
+local UPDATE_INTERVAL = 1
+local BillboardCache = {}
+local nameCache = {}
+
+local RARITY_COLORS = {
+    ["Common"]    = Color3.fromRGB(255, 255, 255),
+    ["Uncommon"]  = Color3.fromRGB(99, 255, 52),
+    ["Rare"]      = Color3.fromRGB(51, 170, 255),
+    ["Epic"]      = Color3.fromRGB(237, 44, 255),
+    ["Legendary"] = Color3.fromRGB(255, 150, 0),
+    ["Omega"]     = Color3.fromRGB(255, 20, 51),
+}
+
+--[[ ============ 3. ESP Inventory ============ ]]
+local function getRealName(t)
+    if not t or not t.Name then return nil end
+    local originalName = t.Name
+    local lowerName = originalName:lower()
+
+    local cleaned = lowerName
+        :gsub("%d+$", "")
+        :gsub("_%d+$", "")
+        :gsub("%s*%d+%s*$", "")
+        :gsub("[%s_]+", " ")
+        :gsub("([^%w%s])", "")
+        :match("^%s*(.-)%s*$")
+
+    if cleaned:find("fishing") or cleaned:find("rod") or cleaned:find("canne") or cleaned:find("pêche") then
+        if cleaned:find("ultimate") or cleaned:find("ult") then
+            return "Ultimate Fishing Rod"
+        elseif cleaned:find("advanced") then
+            return "Advanced Fishing Rod"
+        elseif cleaned:find("pro") then
+            return "Pro Fishing Rod"
+        else
+            return "Regular Fishing Rod"
+        end
+    end
+
+    if nameCache[originalName] then return nameCache[originalName] end
+
+    local h = t:FindFirstChild("Handle")
+    local fallbackName = cleaned
+
+    for _, folder in ipairs({ReplicatedStorage:FindFirstChild("Items"), StarterPack}) do
+        if folder then
+            for _, item in ipairs(folder:GetDescendants()) do
+                if item:IsA("Tool") and item:FindFirstChild("Handle") then
+                    local match = true
+                    if h then
+                        for _, c in ipairs(h:GetChildren()) do
+                            if not item.Handle:FindFirstChild(c.Name) then
+                                match = false
+                                break
+                            end
+                        end
+                    else
+                        match = false
+                    end
+                    if match then
+                        nameCache[originalName] = item.Name
+                        return item.Name
+                    end
+                end
+            end
+        end
+    end
+
+    nameCache[originalName] = fallbackName
+    return fallbackName
+end
+
+local function updateESP(p)
+    local bb = BillboardCache[p]
+    if not bb then return end
+
+    local char = p.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then
+        bb.Enabled = false
+        return
+    end
+
+    local lChar = LocalPlayer.Character
+    if lChar and lChar:FindFirstChild("HumanoidRootPart") then
+        local dist = (lChar.HumanoidRootPart.Position - char.HumanoidRootPart.Position).Magnitude
+        if dist > MAX_DISTANCE then
+            bb.Enabled = false
+            return
+        end
+    end
+
+    local container = bb:FindFirstChild("EspContainer")
+    if not container then return end
+    container:ClearAllChildren()
+
+    local layout = Instance.new("UIListLayout", container)
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    layout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+    layout.Padding = UDim.new(0, 2)
+
+    local tools = {}
+    if p:FindFirstChild("Backpack") then
+        for _, t in ipairs(p.Backpack:GetChildren()) do
+            if t:IsA("Tool") and t.Name:lower() ~= "fists" then table.insert(tools, t) end
+        end
+    end
+    if char then
+        for _, t in ipairs(char:GetChildren()) do
+            if t:IsA("Tool") and t.Name:lower() ~= "fists" then table.insert(tools, t) end
+        end
+    end
+
+    bb.Enabled = espInventoryEnabled and (#tools > 0)
+
+    for _, tool in ipairs(tools) do
+        local name = getRealName(tool)
+        if name then
+            local lbl = Instance.new("TextLabel", container)
+            lbl.Size = UDim2.new(0, 180, 0, 14)
+            lbl.BackgroundTransparency = 1
+            lbl.Text = name
+            lbl.Font = Enum.Font.SourceSansBold
+            lbl.TextSize = 11
+            lbl.TextStrokeTransparency = 0.4
+
+            local rarity = tool:GetAttribute("RarityName") or tool:GetAttribute("Rarity")
+            lbl.TextColor3 = RARITY_COLORS[rarity] or Color3.new(1, 1, 1)
+        end
+    end
+end
+
+local function createESP(p)
+    if p == LocalPlayer then return end
+
+    local function setup(char)
+        local root = char:WaitForChild("HumanoidRootPart", 15)
+        if not root then return end
+
+        if BillboardCache[p] then BillboardCache[p]:Destroy() end
+
+        local bb = Instance.new("BillboardGui", root)
+        bb.Name = "FixedUnderfootESP"
+        bb.Size = UDim2.new(0, 200, 0, 150)
+        bb.StudsOffset = Vector3.new(0, -3.5, 0)
+        bb.AlwaysOnTop = true
+        bb.MaxDistance = MAX_DISTANCE
+
+        local cont = Instance.new("Frame", bb)
+        cont.Name = "EspContainer"
+        cont.Size = UDim2.new(1, 0, 1, 0)
+        cont.BackgroundTransparency = 1
+
+        BillboardCache[p] = bb
+        updateESP(p)
+
+        char.ChildAdded:Connect(function(child)
+            if child:IsA("Tool") then task.wait(0.1); updateESP(p) end
+        end)
+        char.ChildRemoved:Connect(function(child)
+            if child:IsA("Tool") then task.wait(0.1); updateESP(p) end
+        end)
+
+        local backpack = p:WaitForChild("Backpack", 5)
+        if backpack then
+            backpack.ChildAdded:Connect(function() updateESP(p) end)
+            backpack.ChildRemoved:Connect(function() updateESP(p) end)
+        end
+
+        task.spawn(function()
+            while char.Parent and bb.Parent do
+                updateESP(p)
+                task.wait(UPDATE_INTERVAL)
+            end
+        end)
+    end
+
+    p.CharacterAdded:Connect(setup)
+    if p.Character then setup(p.Character) end
+end
+
+for _, p in ipairs(Players:GetPlayers()) do createESP(p) end
+Players.PlayerAdded:Connect(createESP)
+
+print("✅ [AB HUB V1] ระบบ ESP Inventory พร้อม")
+
+--[[ ============ 4. UI ============ ]]
+local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
+ScreenGui.Name = "AB_HUB_V1"
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ResetOnSpawn = false
+
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0.4, 0, 0.65, 0)
+MainFrame.Position = UDim2.new(0.3, 0, 0.18, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Visible = false
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
+
+local MainStroke = Instance.new("UIStroke", MainFrame)
+MainStroke.Thickness = 2
+MainStroke.Color = Color3.fromRGB(0, 200, 255)
+MainStroke.Transparency = 0.3
+
+-- ชื่อเมนูด้านบน
+local TitleLabel = Instance.new("TextLabel", MainFrame)
+TitleLabel.Size = UDim2.new(0.8, 0, 0.10, 0)
+TitleLabel.Position = UDim2.new(0.1, 0, 0.02, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Text = "⚡ AB HUB V1 ⚡"
+TitleLabel.TextColor3 = Color3.fromRGB(0, 200, 255)
+TitleLabel.TextScaled = true
+TitleLabel.Font = Enum.Font.GothamBlack
+
+local ProtectedLabel = Instance.new("TextLabel", MainFrame)
+ProtectedLabel.Size = UDim2.new(0.8, 0, 0.06, 0)
+ProtectedLabel.Position = UDim2.new(0.1, 0, 0.13, 0)
+ProtectedLabel.BackgroundTransparency = 1
+ProtectedLabel.Text = "✅ Authorized | ID: " .. LocalPlayer.UserId
+ProtectedLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+ProtectedLabel.TextScaled = true
+ProtectedLabel.Font = Enum.Font.SourceSansBold
+
+local MainDrag = Instance.new("Frame", MainFrame)
+MainDrag.Size = UDim2.new(1, 0, 0.10, 0)
+MainDrag.BackgroundTransparency = 1
+
+local ToggleButton = Instance.new("TextButton", ScreenGui)
+ToggleButton.Size = UDim2.new(0, 130, 0, 45)
+ToggleButton.Position = UDim2.new(0.85, 0, 0.05, 0)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
+ToggleButton.Text = "AB HUB V1"
+ToggleButton.TextColor3 = Color3.fromRGB(0, 0, 0)
+ToggleButton.TextScaled = true
+ToggleButton.Font = Enum.Font.GothamBold
+Instance.new("UICorner", ToggleButton).CornerRadius = UDim.new(0, 8)
+
+local ToggleDrag = Instance.new("Frame", ToggleButton)
+ToggleDrag.Size = UDim2.new(1, 0, 1, 0)
+ToggleDrag.BackgroundTransparency = 1
+
+local ESPInventoryToggle = Instance.new("TextButton", MainFrame)
+ESPInventoryToggle.Size = UDim2.new(0.8, 0, 0.10, 0)
+ESPInventoryToggle.Position = UDim2.new(0.1, 0, 0.21, 0)
+ESPInventoryToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+ESPInventoryToggle.Text = "ESP Inventory: ON"
+ESPInventoryToggle.TextScaled = true
+Instance.new("UICorner", ESPInventoryToggle).CornerRadius = UDim.new(0, 8)
+
+local ESPToggle = Instance.new("TextButton", MainFrame)
+ESPToggle.Size = UDim2.new(0.8, 0, 0.10, 0)
+ESPToggle.Position = UDim2.new(0.1, 0, 0.33, 0)
+ESPToggle.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+ESPToggle.Text = "ESP: OFF"
+ESPToggle.TextScaled = true
+Instance.new("UICorner", ESPToggle).CornerRadius = UDim.new(0, 8)
+
+local AimbotToggle = Instance.new("TextButton", MainFrame)
+AimbotToggle.Size = UDim2.new(0.8, 0, 0.10, 0)
+AimbotToggle.Position = UDim2.new(0.1, 0, 0.45, 0)
+AimbotToggle.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+AimbotToggle.Text = "Aimbot: OFF"
+AimbotToggle.TextScaled = true
+Instance.new("UICorner", AimbotToggle).CornerRadius = UDim.new(0, 8)
+
+local WallcheckToggle = Instance.new("TextButton", MainFrame)
+WallcheckToggle.Size = UDim2.new(0.8, 0, 0.10, 0)
+WallcheckToggle.Position = UDim2.new(0.1, 0, 0.57, 0)
+WallcheckToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+WallcheckToggle.Text = "Wallcheck: ON"
+WallcheckToggle.TextScaled = true
+WallcheckToggle.TextColor3 = Color3.new(1, 1, 1)
+Instance.new("UICorner", WallcheckToggle).CornerRadius = UDim.new(0, 8)
+
+local FOVSlider = Instance.new("TextBox", MainFrame)
+FOVSlider.Size = UDim2.new(0.8, 0, 0.10, 0)
+FOVSlider.Position = UDim2.new(0.1, 0, 0.69, 0)
+FOVSlider.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+FOVSlider.Text = "FOV: 140"
+FOVSlider.TextColor3 = Color3.fromRGB(255, 255, 255)
+FOVSlider.TextScaled = true
+Instance.new("UICorner", FOVSlider).CornerRadius = UDim.new(0, 8)
+
+local AimPartToggle = Instance.new("TextButton", MainFrame)
+AimPartToggle.Size = UDim2.new(0.8, 0, 0.10, 0)
+AimPartToggle.Position = UDim2.new(0.1, 0, 0.81, 0)
+AimPartToggle.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+AimPartToggle.Text = "Target: Head"
+AimPartToggle.TextScaled = true
+AimPartToggle.TextColor3 = Color3.new(1, 1, 1)
+Instance.new("UICorner", AimPartToggle).CornerRadius = UDim.new(0, 8)
+
+local FOVCircleToggle = Instance.new("TextButton", MainFrame)
+FOVCircleToggle.Size = UDim2.new(0.8, 0, 0.10, 0)
+FOVCircleToggle.Position = UDim2.new(0.1, 0, 0.93, 0)
+FOVCircleToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+FOVCircleToggle.Text = "FOV Circle: ON"
+FOVCircleToggle.TextScaled = true
+FOVCircleToggle.TextColor3 = Color3.new(1, 1, 1)
+Instance.new("UICorner", FOVCircleToggle).CornerRadius = UDim.new(0, 8)
+
+print("✅ [AB HUB V1] UI สร้างเสร็จ")
+
+--[[ ============ 5. ตัวแปร Aimbot ============ ]]
+local espEnabledStatus = false
+local AimbotOn = false
+local FOVRadius = 140
+local WallCheckEnabled = true
+local FOVCircleVisible = true
+local FOVCircleForcedOff = false
+local ProtectedPlayers = {}
+local AIM_SMOOTHNESS = 0.8
+local PREDICTION_TIME = 0.03
+local guiOpen = false
+
+-- FOV Circle (มี fallback ถ้า Drawing ไม่รองรับ)
+local FOVCircle = nil
+local hasDrawing = false
+pcall(function()
+    if Drawing and Drawing.new then
+        FOVCircle = Drawing.new("Circle")
+        FOVCircle.Radius = FOVRadius
+        FOVCircle.Thickness = 2
+        FOVCircle.Color = Color3.fromRGB(0, 200, 255)
+        FOVCircle.Transparency = 0.6
+        FOVCircle.Filled = false
+        FOVCircle.Visible = false
+        hasDrawing = true
+    end
+end)
+
+if hasDrawing then
+    print("✅ [AB HUB V1] Drawing API พร้อมใช้งาน")
+else
+    warn("⚠️ [AB HUB V1] Drawing API ไม่รองรับ - FOV Circle จะไม่แสดง")
+end
+
+local AIM_MODES = {
+    {name = "Head",                    part = "Head",                            color = Color3.fromRGB(100, 100, 255)},
+    {name = "Torso",                   part = "HumanoidRootPart",                color = Color3.fromRGB(255, 150, 50)},
+    {name = "Right Arm",               part = "RightUpperArm",                   color = Color3.fromRGB(50, 205, 50)},
+    {name = "Left Arm",                part = "LeftUpperArm",                    color = Color3.fromRGB(50, 255, 150)},
+    {name = "Auto (Head/Torso)",       parts = {"Head", "HumanoidRootPart"},     color = Color3.fromRGB(180, 100, 255)},
+    {name = "Auto (R/L Arm)",          parts = {"RightUpperArm", "LeftUpperArm"}, color = Color3.fromRGB(255, 255, 0)},
+}
+
+local currentModeIndex = 1
+local currentAutoIndex = 1
+local lastSwitchTime = 0
+local SWITCH_INTERVAL = 0.7
+
+--[[ ============ 6. ฟังก์ชัน Aimbot ============ ]]
+local function IsAlive(char)
+    local h = char and char:FindFirstChildOfClass("Humanoid")
+    return h and h.Health > 0
+end
+
+local function IsVisible(part)
+    if not part then return false end
+    local origin = Camera.CFrame.Position
+    local direction = (part.Position - origin)
+    local params = RaycastParams.new()
+    params.FilterType = En
